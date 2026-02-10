@@ -1,173 +1,586 @@
 """
-CardioScreen - Cardiovascular Disease Risk Prediction
-Streamlit Web Application
-
+CardioScreen Pro — Cardiovascular Disease Risk Prediction
+Clinical Diagnostic Dashboard  •  Version 3.0
+Built with Streamlit  •  scikit-learn Gradient Boosting Pipeline
 Author: Matthias
-Model: Gradient Boosting (scikit-learn), tuned via RandomizedSearchCV
 """
 
-import streamlit as st
+import os
+from datetime import datetime
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-import os
+import plotly.graph_objects as go
+import streamlit as st
 
-# ─────────────────────────── Page Configuration ───────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━  PAGE CONFIG  ━━━━━━━━━━━━━━━━━━━━
 st.set_page_config(
-    page_title="CardioScreen - CVD Risk Predictor",
-    page_icon="❤️",
-    layout="centered",
+    page_title="CardioScreen Pro | CVD Diagnostic Suite",
+    page_icon="🫀",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# ─────────────────────────── Load Model ───────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━  SESSION STATE  ━━━━━━━━━━━━━━━━━━━━
+for key, default in [
+    ("prediction_results", None),
+    ("run_count", 0),
+    ("history", []),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# ━━━━━━━━━━━━━━━━━━━━  PREMIUM CSS  ━━━━━━━━━━━━━━━━━━━━
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* ── Global ────────────────────────────────── */
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+.main { background: linear-gradient(160deg, #0d1117 0%, #101820 50%, #0d1117 100%); }
+
+/* ── Sidebar ───────────────────────────────── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1117, #131a24) !important;
+    border-right: 1px solid rgba(255,255,255,0.04);
+}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+section[data-testid="stSidebar"] label { color: #c9d1d9 !important; }
+
+/* ── Metric cards ──────────────────────────── */
+[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 18px 22px !important;
+    transition: border 0.3s;
+}
+[data-testid="stMetric"]:hover { border: 1px solid rgba(255,75,75,0.25); }
+
+/* ── Primary button ────────────────────────── */
+div.stButton > button[kind="primary"],
+div.stButton > button {
+    width: 100%;
+    border-radius: 12px;
+    height: 3.8em;
+    background: linear-gradient(135deg, #d63031 0%, #6c5ce7 100%);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border: none;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    box-shadow: 0 8px 24px rgba(214,48,49,0.25);
+    transition: all 0.35s cubic-bezier(.4,0,.2,1);
+}
+div.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 32px rgba(108,92,231,0.35);
+    background: linear-gradient(135deg, #e84343 0%, #7e6eea 100%);
+}
+
+/* ── Glass card ────────────────────────────── */
+.glass {
+    background: rgba(255,255,255,0.025);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 28px 30px;
+    margin-bottom: 20px;
+}
+.glass:hover { border-color: rgba(255,75,75,0.18); }
+
+/* ── Risk badge ────────────────────────────── */
+.badge-high {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 1.2px;
+    background: rgba(214,48,49,0.15);
+    color: #ff6b6b;
+    border: 1px solid rgba(214,48,49,0.35);
+}
+.badge-low {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 1.2px;
+    background: rgba(0,206,120,0.12);
+    color: #00ce78;
+    border: 1px solid rgba(0,206,120,0.3);
+}
+
+/* ── Score typography ──────────────────────── */
+.score-high {
+    font-size: 4.5rem; font-weight: 900; line-height: 1;
+    background: linear-gradient(180deg, #ffffff 30%, #ff6b6b 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.score-low {
+    font-size: 4.5rem; font-weight: 900; line-height: 1;
+    background: linear-gradient(180deg, #ffffff 30%, #00ce78 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* ── Protocol card ─────────────────────────── */
+.protocol {
+    background: rgba(255,255,255,0.025);
+    padding: 14px 18px;
+    border-radius: 10px;
+    border-left: 4px solid #6c5ce7;
+    margin-bottom: 10px;
+    font-size: 0.92rem;
+    color: #c9d1d9;
+}
+.protocol.urgent { border-left-color: #d63031; }
+
+/* ── Tabs ──────────────────────────────────── */
+button[data-baseweb="tab"] { font-weight: 600 !important; letter-spacing: 0.5px; }
+
+/* ── Scrollbar ─────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 6px; }
+
+/* ── Dividers ──────────────────────────────── */
+hr { border-color: rgba(255,255,255,0.06) !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━  MODEL LOADER  ━━━━━━━━━━━━━━━━━━━━
 @st.cache_resource
-def load_model():
-    model_path = os.path.join(os.path.dirname(__file__), "cardio_pipeline.pkl")
-    features_path = os.path.join(os.path.dirname(__file__), "feature_names.pkl")
-    pipeline = joblib.load(model_path)
-    feature_names = joblib.load(features_path)
-    return pipeline, feature_names
+def load_assets():
+    try:
+        base = os.path.dirname(__file__)
+        return (
+            joblib.load(os.path.join(base, "cardio_pipeline.pkl")),
+            joblib.load(os.path.join(base, "feature_names.pkl")),
+        )
+    except Exception:
+        return None, None
 
-try:
-    pipeline, feature_names = load_model()
-    model_loaded = True
-except Exception as e:
-    model_loaded = False
-    st.error(f"⚠️ Could not load model: {e}")
+pipeline, feature_names = load_assets()
 
-# ─────────────────────────── Header ───────────────────────────
-st.title("❤️ CardioScreen")
-st.subheader("Cardiovascular Disease Risk Prediction")
-st.markdown(
-    "Enter your health screening data below to receive an **instant CVD risk estimate**. "
-    "This tool is designed for primary-care clinics and health-screening programmes."
-)
-st.divider()
 
-# ─────────────────────────── Sidebar Inputs ───────────────────────────
-st.sidebar.header("🩺 Patient Information")
+# ━━━━━━━━━━━━━━━━━━━━  CHART HELPERS  ━━━━━━━━━━━━━━━━━━━━
+def gauge_chart(value: float, color: str):
+    """Semicircular gauge for CVD probability."""
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=value,
+        number={"suffix": "%", "font": {"size": 38, "color": "white", "family": "Inter"}},
+        delta={"reference": 50, "increasing": {"color": "#ff6b6b"}, "decreasing": {"color": "#00ce78"},
+               "font": {"size": 14}},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "rgba(255,255,255,0.2)",
+                     "tickfont": {"color": "rgba(255,255,255,0.5)", "size": 10}},
+            "bar": {"color": color, "thickness": 0.7},
+            "bgcolor": "rgba(0,0,0,0)",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, 30], "color": "rgba(0,206,120,0.08)"},
+                {"range": [30, 60], "color": "rgba(255,193,7,0.06)"},
+                {"range": [60, 100], "color": "rgba(214,48,49,0.08)"},
+            ],
+            "threshold": {"line": {"color": "white", "width": 2}, "thickness": 0.8, "value": value},
+        },
+    ))
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "white", "family": "Inter"},
+        height=230, margin=dict(l=30, r=30, t=30, b=10),
+    )
+    return fig
 
-age = st.sidebar.slider("Age (years)", min_value=30, max_value=80, value=50, step=1)
-gender = st.sidebar.selectbox("Gender", options=[1, 2], format_func=lambda x: "Female" if x == 1 else "Male")
 
-st.sidebar.header("📏 Body Measurements")
-height = st.sidebar.slider("Height (cm)", min_value=120, max_value=220, value=165, step=1)
-weight = st.sidebar.slider("Weight (kg)", min_value=30, max_value=200, value=70, step=1)
+def radar_chart(bmi_norm, bp_norm, chol_norm, gluc_norm, smoke_norm, activity_norm):
+    """Spider / radar chart for risk factor profile."""
+    cats = ["BMI", "Blood Pressure", "Cholesterol", "Glucose", "Smoking", "Inactivity"]
+    vals = [bmi_norm, bp_norm, chol_norm, gluc_norm, smoke_norm, activity_norm]
+    vals.append(vals[0])  # close polygon
+    cats.append(cats[0])
 
-st.sidebar.header("🩸 Blood Pressure")
-ap_hi = st.sidebar.slider("Systolic BP (mmHg)", min_value=60, max_value=250, value=120, step=1)
-ap_lo = st.sidebar.slider("Diastolic BP (mmHg)", min_value=30, max_value=150, value=80, step=1)
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=vals, theta=cats, fill='toself',
+        fillcolor='rgba(108,92,231,0.15)',
+        line=dict(color='#6c5ce7', width=2),
+        marker=dict(size=6, color='#a29bfe'),
+        name='Patient',
+    ))
+    fig.update_layout(
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(visible=True, range=[0, 1], showticklabels=False,
+                            gridcolor="rgba(255,255,255,0.06)"),
+            angularaxis=dict(gridcolor="rgba(255,255,255,0.06)",
+                             tickfont=dict(color="rgba(255,255,255,0.7)", size=11)),
+        ),
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white", family="Inter"),
+        height=300, margin=dict(l=50, r=50, t=30, b=30),
+        showlegend=False,
+    )
+    return fig
 
-# Validate BP
-if ap_lo >= ap_hi:
-    st.sidebar.error("⚠️ Diastolic BP must be lower than Systolic BP. Please correct.")
 
-st.sidebar.header("🔬 Lab Results")
-cholesterol = st.sidebar.selectbox(
-    "Cholesterol Level",
-    options=[1, 2, 3],
-    format_func=lambda x: {1: "Normal", 2: "Above Normal", 3: "Well Above Normal"}[x]
-)
-gluc = st.sidebar.selectbox(
-    "Glucose Level",
-    options=[1, 2, 3],
-    format_func=lambda x: {1: "Normal", 2: "Above Normal", 3: "Well Above Normal"}[x]
-)
+# ━━━━━━━━━━━━━━━━━━━━  SIDEBAR  ━━━━━━━━━━━━━━━━━━━━━━━━━
+with st.sidebar:
+    st.markdown(
+        "<div style='text-align:center; padding: 10px 0 0 0;'>"
+        "<span style='font-size:2.2rem;'>🫀</span><br>"
+        "<span style='font-size:1.4rem; font-weight:800; letter-spacing:-0.5px; color:#ff6b6b;'>"
+        "CARDIO</span><span style='font-size:1.4rem; font-weight:800; color:#c9d1d9;'>SCREEN</span>"
+        "<span style='font-size:1.4rem; font-weight:300; color:#6c5ce7;'> PRO</span>"
+        "<br><span style='font-size:0.7rem; color:#484f58; letter-spacing:2px;'>"
+        "CLINICAL DIAGNOSTIC SUITE</span></div>",
+        unsafe_allow_html=True,
+    )
+    st.divider()
 
-st.sidebar.header("🚬 Lifestyle")
-smoke = st.sidebar.selectbox("Smoking", options=[0, 1], format_func=lambda x: "No" if x == 0 else "Yes")
-alco = st.sidebar.selectbox("Alcohol Intake", options=[0, 1], format_func=lambda x: "No" if x == 0 else "Yes")
-active = st.sidebar.selectbox("Physically Active", options=[0, 1], format_func=lambda x: "No" if x == 0 else "Yes")
+    # ── Patient Identity ──
+    with st.expander("👤  PATIENT IDENTITY", expanded=True):
+        age = st.slider("Age (years)", 30, 80, 50)
+        gender = st.selectbox(
+            "Biological Sex",
+            options=[1, 2],
+            format_func=lambda x: "♀  Female" if x == 1 else "♂  Male",
+        )
 
-# ─────────────────────────── Feature Engineering ───────────────────────────
+    # ── Biometrics ──
+    with st.expander("📏  BIOMETRICS", expanded=True):
+        bc1, bc2 = st.columns(2)
+        height = bc1.number_input("Height (cm)", 120, 220, 165)
+        weight = bc2.number_input("Weight (kg)", 30, 200, 70)
+
+    # ── Vitals & Labs ──
+    with st.expander("🩸  VITALS & LABS", expanded=True):
+        ap_hi = st.slider("Systolic BP (mmHg)", 60, 250, 120)
+        ap_lo = st.slider("Diastolic BP (mmHg)", 30, 150, 80)
+        chol = st.select_slider(
+            "Cholesterol",
+            options=[1, 2, 3],
+            value=1,
+            format_func=lambda x: ["✅ Normal", "⚠️ Elevated", "🔴 Critical"][x - 1],
+        )
+        gluc = st.select_slider(
+            "Glucose",
+            options=[1, 2, 3],
+            value=1,
+            format_func=lambda x: ["✅ Normal", "⚠️ Elevated", "🔴 Critical"][x - 1],
+        )
+
+    # ── Lifestyle ──
+    with st.expander("🚬  LIFESTYLE", expanded=True):
+        smoke = st.toggle("Nicotine / Tobacco Use")
+        alco = st.toggle("Regular Alcohol Intake")
+        active = st.toggle("Physical Activity (≥150 min/wk)", value=True)
+
+    st.divider()
+    st.caption(f"Session started {datetime.now().strftime('%d %b %Y')}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━  DERIVED METRICS  ━━━━━━━━━━━━━━━━━━
 bmi = round(weight / ((height / 100) ** 2), 1)
 pulse_pressure = ap_hi - ap_lo
-high_bp_flag = int(ap_hi >= 140 or ap_lo >= 90)
-map_val = round(ap_lo + (pulse_pressure / 3), 1)
+mean_ap = round(ap_lo + (pulse_pressure / 3), 1)
+high_bp = int(ap_hi >= 140 or ap_lo >= 90)
 
-# ─────────────────────────── Display Patient Summary ───────────────────────────
-st.divider()
+# Normalised 0-1 risk factors for radar chart
+bmi_n = min((max(bmi - 18.5, 0)) / 20, 1.0)
+bp_n = min(max(ap_hi - 90, 0) / 160, 1.0)
+chol_n = (chol - 1) / 2
+gluc_n = (gluc - 1) / 2
+smoke_n = 1.0 if smoke else 0.0
+inactivity_n = 0.0 if active else 1.0
 
-# ─────────────────────────── Prediction ───────────────────────────
-predict_clicked = st.button("🔍 Predict Risk")
 
-if not predict_clicked:
-    st.info("Adjust the inputs, then click **Predict Risk** to generate a screening report.")
-elif not model_loaded:
-    st.warning("Model could not be loaded. Please ensure `cardio_pipeline.pkl` and `feature_names.pkl` exist.")
-elif ap_lo >= ap_hi:
-    st.warning("Prediction unavailable — please correct the blood pressure inputs and try again.")
-else:
-    # Build input DataFrame matching training feature order
-    input_data = pd.DataFrame([{
-        'age': age,
-        'gender': gender,
-        'height': height,
-        'weight': weight,
-        'ap_hi': ap_hi,
-        'ap_lo': ap_lo,
-        'cholesterol': cholesterol,
-        'gluc': gluc,
-        'smoke': smoke,
-        'alco': alco,
-        'active': active,
-        'bmi': bmi,
-        'pulse_pressure': pulse_pressure,
-        'high_bp_flag': high_bp_flag,
-        'map': map_val,
-    }])
+# ━━━━━━━━━━━━━━━━━━━━  MAIN LAYOUT  ━━━━━━━━━━━━━━━━━━━━━
+# ── Header ──
+hdr_l, hdr_r = st.columns([3, 1])
+with hdr_l:
+    st.markdown(
+        "<h2 style='margin-bottom:2px; font-weight:800; letter-spacing:-0.5px;'>"
+        "Clinical Dashboard</h2>"
+        "<p style='color:#8b949e; margin-top:0; font-size:0.88rem;'>"
+        "Real-time cardiovascular risk stratification powered by machine learning</p>",
+        unsafe_allow_html=True,
+    )
+with hdr_r:
+    st.markdown(
+        f"<p style='text-align:right; color:#484f58; font-size:0.78rem; padding-top:12px;'>"
+        f"📅 {datetime.now().strftime('%d %B %Y  •  %H:%M')}<br>"
+        f"Analyses this session: <b style='color:#c9d1d9;'>{st.session_state.run_count}</b></p>",
+        unsafe_allow_html=True,
+    )
 
-    # Ensure column order matches training
-    input_data = input_data[feature_names]
+# ── KPI Strip ──
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    bmi_delta = f"{bmi - 24.9:+.1f}" if bmi > 24.9 else "Healthy"
+    st.metric("Body Mass Index", f"{bmi}", delta=bmi_delta, delta_color="inverse")
+with k2:
+    st.metric("Blood Pressure", f"{ap_hi}/{ap_lo}",
+              delta="Hypertensive" if high_bp else "Optimal", delta_color="inverse")
+with k3:
+    st.metric("Mean Arterial Pressure", f"{mean_ap} mmHg")
+with k4:
+    st.metric("Patient Age", f"{age} yr")
 
-    prediction = pipeline.predict(input_data)[0]
-    probability = pipeline.predict_proba(input_data)[0]
+st.markdown("")  # small spacer
 
-    prob_cvd = probability[1] * 100
-    prob_no_cvd = probability[0] * 100
+# ── Two-column body ──
+col_left, col_right = st.columns([5, 2])
 
-    # ─────────────────────── Result Display ───────────────────────
-    if prediction == 1:
-        st.error("## 🔴 HIGH RISK — CVD Detected")
-        st.markdown(f"**Probability of CVD:** {prob_cvd:.1f}%")
-        st.progress(prob_cvd / 100)
-        st.markdown(
-            "**Interpretation:** Based on the provided health data, this patient has a "
-            f"**{prob_cvd:.1f}% estimated probability** of having cardiovascular disease. "
-            "We recommend follow-up with a cardiologist for further evaluation including "
-            "ECG, lipid panel, and cardiac imaging."
-        )
+# ─────────────── LEFT COLUMN: Diagnosis Engine ───────────────
+with col_left:
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+
+    # Input validation
+    if ap_lo >= ap_hi:
+        st.error("⛔  **Input Error:** Diastolic pressure ≥ Systolic. Correct the vitals in the sidebar.")
     else:
-        st.success("## 🟢 LOW RISK — No CVD Detected")
-        st.markdown(f"**Probability of No CVD:** {prob_no_cvd:.1f}%")
-        st.progress(prob_no_cvd / 100)
-        st.markdown(
-            "**Interpretation:** Based on the provided health data, this patient has a "
-            f"**{prob_no_cvd:.1f}% estimated probability** of being free from cardiovascular disease. "
-            "Continue routine health monitoring and maintain a healthy lifestyle."
+        if st.button("🔬  EXECUTE DIAGNOSTIC ANALYSIS"):
+            if pipeline is not None and feature_names is not None:
+                row = {
+                    "age": age, "gender": gender, "height": height, "weight": weight,
+                    "ap_hi": ap_hi, "ap_lo": ap_lo, "cholesterol": chol, "gluc": gluc,
+                    "smoke": int(smoke), "alco": int(alco), "active": int(active),
+                    "bmi": bmi, "pulse_pressure": pulse_pressure,
+                    "high_bp_flag": high_bp, "map": mean_ap,
+                }
+                input_df = pd.DataFrame([row])[feature_names]
+                prob = pipeline.predict_proba(input_df)[0][1] * 100
+                st.session_state.prediction_results = {
+                    "prob": prob,
+                    "risk": "HIGH" if prob > 50 else "LOW",
+                    "ts": datetime.now().strftime("%H:%M:%S"),
+                }
+                st.session_state.run_count += 1
+                st.session_state.history.append(round(prob, 1))
+                if prob < 30:
+                    st.balloons()
+            else:
+                st.error("Model assets not found. Ensure `cardio_pipeline.pkl` and `feature_names.pkl` are present.")
+
+    # ── Results Panel ──
+    if st.session_state.prediction_results:
+        res = st.session_state.prediction_results
+        is_high = res["prob"] > 50
+        accent = "#ff6b6b" if is_high else "#00ce78"
+
+        st.markdown("---")
+        rl, rr = st.columns([1, 1])
+
+        with rl:
+            badge_cls = "badge-high" if is_high else "badge-low"
+            score_cls = "score-high" if is_high else "score-low"
+            st.markdown(f'<span class="{badge_cls}">{res["risk"]} RISK</span>', unsafe_allow_html=True)
+            st.markdown(f'<p class="{score_cls}">{res["prob"]:.1f}%</p>', unsafe_allow_html=True)
+            st.caption(f'Completed {res["ts"]}  •  Run #{st.session_state.run_count}')
+
+            # Interpretation
+            if is_high:
+                st.markdown(
+                    "**Interpretation:** Elevated cardiovascular risk detected. "
+                    "Multiple clinical indicators exceed optimal thresholds. "
+                    "Recommend comprehensive cardiovascular workup and specialist referral."
+                )
+            else:
+                st.markdown(
+                    "**Interpretation:** Risk profile within acceptable range. "
+                    "Continue current preventive measures and schedule routine follow-up screening."
+                )
+
+        with rr:
+            st.plotly_chart(gauge_chart(res["prob"], accent), use_container_width=True)
+
+    else:
+        st.info(
+            "👋  **Welcome** — Configure patient parameters in the sidebar and click the button above "
+            "to generate a cardiovascular risk assessment."
         )
 
-    # Risk factor breakdown
-    st.divider()
-    st.subheader("📊 Key Risk Indicators")
-    risk_col1, risk_col2 = st.columns(2)
-    with risk_col1:
-        bp_status = "⚠️ High" if high_bp_flag else "✅ Normal"
-        bmi_status = "⚠️ Overweight/Obese" if bmi >= 25 else "✅ Normal"
-        st.markdown(f"- **Blood Pressure:** {bp_status}")
-        st.markdown(f"- **BMI Category:** {bmi_status}")
-        st.markdown(f"- **Cholesterol:** {'⚠️ Elevated' if cholesterol > 1 else '✅ Normal'}")
-    with risk_col2:
-        st.markdown(f"- **Glucose:** {'⚠️ Elevated' if gluc > 1 else '✅ Normal'}")
-        st.markdown(f"- **Smoking:** {'⚠️ Smoker' if smoke else '✅ Non-smoker'}")
-        st.markdown(f"- **Physical Activity:** {'✅ Active' if active else '⚠️ Inactive'}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# ─────────────────────────── Disclaimer ───────────────────────────
-st.divider()
-st.caption(
-    "⚕️ **Medical Disclaimer:** This tool is for screening purposes only and does NOT replace "
-    "professional medical advice, diagnosis, or treatment. Always consult a qualified healthcare "
-    "provider for medical decisions. Model accuracy is approximately 73-74% and should be used "
-    "as one input among many clinical considerations."
+    # ── Tabbed Details ──
+    tab_proto, tab_profile, tab_hemo = st.tabs([
+        "📋  Clinical Protocols", "🕸️  Risk Profile", "📊  Hemodynamics"
+    ])
+
+    with tab_proto:
+        if st.session_state.prediction_results:
+            st.markdown("#### Recommended Clinical Protocols")
+            p1, p2 = st.columns(2)
+
+            with p1:
+                if bmi > 25:
+                    st.markdown(
+                        '<div class="protocol urgent">⚖️ <b>Weight Management</b> — '
+                        'Prescribe caloric deficit plan; target BMI &lt; 25. '
+                        'Refer to dietitian.</div>',
+                        unsafe_allow_html=True,
+                    )
+                if high_bp:
+                    st.markdown(
+                        '<div class="protocol urgent">🩸 <b>Hypertension Control</b> — '
+                        'Initiate 24-hr ambulatory BP monitoring. '
+                        'Evaluate ACE inhibitor / ARB therapy.</div>',
+                        unsafe_allow_html=True,
+                    )
+                if chol > 1:
+                    st.markdown(
+                        '<div class="protocol">🧪 <b>Lipid Intervention</b> — '
+                        'Order fasting lipid panel. '
+                        'Consider statin therapy if LDL &gt; 130 mg/dL.</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            with p2:
+                if smoke:
+                    st.markdown(
+                        '<div class="protocol urgent">🚬 <b>Smoking Cessation</b> — '
+                        'Initiate nicotine replacement therapy. '
+                        'Schedule behavioral counseling.</div>',
+                        unsafe_allow_html=True,
+                    )
+                if not active:
+                    st.markdown(
+                        '<div class="protocol">🏃 <b>Exercise Prescription</b> — '
+                        'Prescribe ≥ 150 min/week moderate-intensity aerobic activity. '
+                        'Gradual ramp-up over 4 weeks.</div>',
+                        unsafe_allow_html=True,
+                    )
+                if gluc > 1:
+                    st.markdown(
+                        '<div class="protocol">🔬 <b>Glycemic Monitoring</b> — '
+                        'Order HbA1c panel. Consider metformin if prediabetic.</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # If no flags at all
+            if bmi <= 25 and not high_bp and chol == 1 and gluc == 1 and not smoke and active:
+                st.success("All clinical indicators within optimal ranges. Maintain current lifestyle.")
+        else:
+            st.caption("Execute an analysis to generate personalised protocols.")
+
+    with tab_profile:
+        st.markdown("#### Risk Factor Fingerprint")
+        st.plotly_chart(
+            radar_chart(bmi_n, bp_n, chol_n, gluc_n, smoke_n, inactivity_n),
+            use_container_width=True,
+        )
+        st.caption(
+            "Each axis represents a normalised risk factor (0 = optimal, 1 = highest risk). "
+            "A smaller polygon indicates a healthier overall profile."
+        )
+
+    with tab_hemo:
+        st.markdown("#### Hemodynamic Summary")
+
+        def status_icon(ok: bool):
+            return "✅" if ok else "⚠️"
+
+        hemo_df = pd.DataFrame({
+            "Indicator": ["Body Mass Index", "Systolic BP", "Diastolic BP",
+                          "Mean Arterial Pressure", "Pulse Pressure"],
+            "Measured": [bmi, ap_hi, ap_lo, mean_ap, pulse_pressure],
+            "Reference": ["18.5 – 24.9", "< 130 mmHg", "< 85 mmHg", "70 – 100 mmHg", "30 – 50 mmHg"],
+            "Status": [
+                status_icon(18.5 <= bmi <= 24.9),
+                status_icon(ap_hi < 130),
+                status_icon(ap_lo < 85),
+                status_icon(70 <= mean_ap <= 100),
+                status_icon(30 <= pulse_pressure <= 50),
+            ],
+        })
+        st.dataframe(hemo_df, hide_index=True, use_container_width=True)
+
+
+# ─────────────── RIGHT COLUMN: Intel & Notes ─────────────────
+with col_right:
+    # System Info Card
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.markdown("#### 🧬  System Intelligence")
+    st.markdown(
+        "<span style='font-size:0.85rem; color:#8b949e;'>"
+        "Gradient Boosting classifier trained on <b style='color:#c9d1d9;'>70 000+</b> patient "
+        "records from the Kaggle Cardiovascular Disease dataset.</span>",
+        unsafe_allow_html=True,
+    )
+    st.progress(0.735, text="Model Accuracy: 73.5 %")
+    st.markdown("")
+
+    # Quick stats
+    st.markdown("**Pipeline Info**")
+    info_data = {
+        "Algorithm": "GradientBoostingClassifier",
+        "Library": "scikit-learn 1.5.2",
+        "Features": f"{len(feature_names) if feature_names else '—'}",
+        "Preprocessing": "ColumnTransformer",
+    }
+    for label, val in info_data.items():
+        st.markdown(
+            f"<span style='font-size:0.8rem; color:#6e7681;'>{label}</span><br>"
+            f"<span style='font-size:0.88rem; color:#c9d1d9;'>{val}</span>",
+            unsafe_allow_html=True,
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Analysis History Sparkline
+    if st.session_state.history:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("#### 📈  Session History")
+        hist = st.session_state.history
+        spark = go.Figure(go.Scatter(
+            y=hist, mode="lines+markers",
+            line=dict(color="#6c5ce7", width=2),
+            marker=dict(size=6, color="#a29bfe"),
+            fill="tozeroy", fillcolor="rgba(108,92,231,0.08)",
+        ))
+        spark.update_layout(
+            height=160, margin=dict(l=0, r=0, t=10, b=0),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(visible=False), yaxis=dict(visible=False, range=[0, 100]),
+        )
+        st.plotly_chart(spark, use_container_width=True)
+        st.caption(f"Last: **{hist[-1]}%** • Min: {min(hist)}% • Max: {max(hist)}%")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Notes Card
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.markdown("#### 📝  Clinical Notes")
+    st.text_area(
+        "Observations",
+        placeholder="Document findings, differential considerations, follow-up plan…",
+        height=120,
+        label_visibility="collapsed",
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Disclaimer
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.markdown("#### ⚕️  Disclaimer")
+    st.caption(
+        "This tool is intended for clinical screening assistance only. "
+        "It does **not** replace professional medical judgment, formal diagnosis, "
+        "or treatment planning. Always consult a qualified healthcare provider."
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ━━━━━━━━━━━━━━━━━━━━  FOOTER  ━━━━━━━━━━━━━━━━━━━━━━━━━
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown(
+    "<hr style='border-color: rgba(255,255,255,0.05);'>"
+    "<p style='text-align:center; color:#484f58; font-size:0.75rem;'>"
+    "© 2026 CardioScreen Pro  •  Clinical Diagnostic Suite v3.0  •  "
+    "Built with Streamlit & scikit-learn  •  Secure Environment</p>",
+    unsafe_allow_html=True,
 )
-st.caption("Built with Streamlit | Model: Gradient Boosting (scikit-learn) | Dataset: Kaggle Cardiovascular Disease")

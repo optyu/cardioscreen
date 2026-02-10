@@ -6,7 +6,6 @@ Author: Matthias
 """
 
 import os
-from datetime import datetime
 
 import joblib
 import numpy as np
@@ -268,7 +267,6 @@ else:
             st.session_state.prediction_results = {
                 "prob": prob,
                 "risk": "HIGH" if prob > 50 else "LOW",
-                "ts": datetime.now().strftime("%H:%M:%S"),
             }
         else:
             st.error("Model files missing — ensure `cardio_pipeline.pkl` and `feature_names.pkl` exist.")
@@ -289,7 +287,6 @@ if st.session_state.prediction_results:
         score = "score-high" if high else "score-low"
         st.markdown(f'<span class="{badge}">{res["risk"]} RISK</span>', unsafe_allow_html=True)
         st.markdown(f'<p class="{score}">{res["prob"]:.1f}%</p>', unsafe_allow_html=True)
-        st.caption(f'Analysis at {res["ts"]}')
         st.markdown("")
         if high:
             st.markdown(

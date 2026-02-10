@@ -86,18 +86,18 @@ high_bp_flag = int(ap_hi >= 140 or ap_lo >= 90)
 map_val = round(ap_lo + (pulse_pressure / 3), 1)
 
 # ─────────────────────────── Display Patient Summary ───────────────────────────
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("BMI", f"{bmi:.1f}")
-with col2:
-    st.metric("Pulse Pressure", f"{pulse_pressure} mmHg")
-with col3:
-    st.metric("MAP", f"{map_val:.1f} mmHg")
-
 st.divider()
 
 # ─────────────────────────── Prediction ───────────────────────────
-if model_loaded and ap_lo < ap_hi:
+predict_clicked = st.button("🔍 Predict Risk")
+
+if not predict_clicked:
+    st.info("Adjust the inputs, then click **Predict Risk** to generate a screening report.")
+elif not model_loaded:
+    st.warning("Model could not be loaded. Please ensure `cardio_pipeline.pkl` and `feature_names.pkl` exist.")
+elif ap_lo >= ap_hi:
+    st.warning("Prediction unavailable — please correct the blood pressure inputs and try again.")
+else:
     # Build input DataFrame matching training feature order
     input_data = pd.DataFrame([{
         'age': age,
@@ -128,7 +128,7 @@ if model_loaded and ap_lo < ap_hi:
 
     # ─────────────────────── Result Display ───────────────────────
     if prediction == 1:
-        st.error(f"## 🔴 HIGH RISK — CVD Detected")
+        st.error("## 🔴 HIGH RISK — CVD Detected")
         st.markdown(f"**Probability of CVD:** {prob_cvd:.1f}%")
         st.progress(prob_cvd / 100)
         st.markdown(
@@ -138,7 +138,7 @@ if model_loaded and ap_lo < ap_hi:
             "ECG, lipid panel, and cardiac imaging."
         )
     else:
-        st.success(f"## 🟢 LOW RISK — No CVD Detected")
+        st.success("## 🟢 LOW RISK — No CVD Detected")
         st.markdown(f"**Probability of No CVD:** {prob_no_cvd:.1f}%")
         st.progress(prob_no_cvd / 100)
         st.markdown(
@@ -161,9 +161,6 @@ if model_loaded and ap_lo < ap_hi:
         st.markdown(f"- **Glucose:** {'⚠️ Elevated' if gluc > 1 else '✅ Normal'}")
         st.markdown(f"- **Smoking:** {'⚠️ Smoker' if smoke else '✅ Non-smoker'}")
         st.markdown(f"- **Physical Activity:** {'✅ Active' if active else '⚠️ Inactive'}")
-
-elif not model_loaded:
-    st.warning("Model could not be loaded. Please ensure `cardio_pipeline.pkl` and `feature_names.pkl` exist.")
 
 # ─────────────────────────── Disclaimer ───────────────────────────
 st.divider()
